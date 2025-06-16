@@ -162,7 +162,7 @@ var fileManager = NewFileManager()
 
 // uploaderUtility handles the file upload request.
 // It processes multipart form data, saves file chunks, and stitches them together if all chunks are received.
-func UploaderUtility(r *http.Request) (map[string]interface{}, error) {
+func UploaderHelper(r *http.Request) (map[string]interface{}, error) {
 	if r.Method != http.MethodPost {
 		return nil, fmt.Errorf("method not allowed")
 	}
