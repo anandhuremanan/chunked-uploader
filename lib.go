@@ -3,6 +3,7 @@
 package chunkeduploader
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -105,6 +106,20 @@ func cleanupChunks(fileName string) {
 	fileManager.RemoveFile(fileName)
 }
 
+func parseAdditionalParams(additionalParamsStr string) map[string]interface{} {
+	if additionalParamsStr == "" {
+		return map[string]interface{}{}
+	}
+
+	var additionalParams map[string]interface{}
+	if err := json.Unmarshal([]byte(additionalParamsStr), &additionalParams); err != nil {
+		log.Printf("Warning: Failed to parse additionalParams as JSON: %v", err)
+		return map[string]interface{}{}
+	}
+
+	return additionalParams
+}
+
 func NewFileManager() *FileManager {
 	return &FileManager{
 		chunks: make(map[string][]string),
@@ -177,6 +192,8 @@ func UploaderHelper(r *http.Request) (map[string]interface{}, error) {
 	chunkIndexStr := r.FormValue("chunkIndex")
 	totalChunksStr := r.FormValue("totalChunks")
 	fileSizeStr := r.FormValue("fileSize")
+	additionalParamsStr := r.FormValue("additionalParams")
+	additionalParams := parseAdditionalParams(additionalParamsStr)
 
 	if fileName == "" {
 		return nil, fmt.Errorf("fileName is required")
@@ -236,17 +253,19 @@ func UploaderHelper(r *http.Request) (map[string]interface{}, error) {
 		cleanupChunks(fileName)
 
 		return map[string]interface{}{
-			"status":   "complete",
-			"fileName": fileName,
-			"message":  "File uploaded and stitched successfully",
-			"metadata": metadata,
+			"status":           "complete",
+			"fileName":         fileName,
+			"message":          "File uploaded and stitched successfully",
+			"metadata":         metadata,
+			"additionalParams": additionalParams,
 		}, nil
 	}
 
 	return map[string]interface{}{
-		"status":      "chunk_received",
-		"fileName":    fileName,
-		"chunkIndex":  chunkIndex,
-		"totalChunks": totalChunks,
+		"status":           "chunk_received",
+		"fileName":         fileName,
+		"chunkIndex":       chunkIndex,
+		"totalChunks":      totalChunks,
+		"additionalParams": additionalParams,
 	}, nil
 }

@@ -13,7 +13,7 @@ import (
 )
 
 // Helper function to create multipart form data for testing
-func createMultipartForm(fileName string, chunkIndex, totalChunks int, fileSize int64, chunkData []byte) (*http.Request, error) {
+func createMultipartForm(fileName string, chunkIndex, totalChunks int, fileSize int64, chunkData []byte, additionalParams string) (*http.Request, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
@@ -22,6 +22,7 @@ func createMultipartForm(fileName string, chunkIndex, totalChunks int, fileSize 
 	writer.WriteField("chunkIndex", fmt.Sprintf("%d", chunkIndex))
 	writer.WriteField("totalChunks", fmt.Sprintf("%d", totalChunks))
 	writer.WriteField("fileSize", fmt.Sprintf("%d", fileSize))
+	writer.WriteField("additionalParams", additionalParams)
 
 	// Add file field
 	part, err := writer.CreateFormFile("chunk", fmt.Sprintf("chunk_%d", chunkIndex))
@@ -89,10 +90,10 @@ func TestFileManager_RemoveFile(t *testing.T) {
 	}
 }
 
-func TestUploaderUtility_InvalidMethod(t *testing.T) {
+func TestUploaderHelper_InvalidMethod(t *testing.T) {
 	req := httptest.NewRequest("GET", "/upload", nil)
 
-	_, err := uploaderUtility(req)
+	_, err := UploaderHelper(req)
 	if err == nil {
 		t.Error("Expected error for invalid method")
 	}
@@ -102,18 +103,19 @@ func TestUploaderUtility_InvalidMethod(t *testing.T) {
 	}
 }
 
-func TestUploaderUtility_MissingFileName(t *testing.T) {
+func TestUploaderHelper_MissingFileName(t *testing.T) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	writer.WriteField("chunkIndex", "0")
 	writer.WriteField("totalChunks", "1")
 	writer.WriteField("fileSize", "100")
+	writer.WriteField("additionalParams", "")
 	writer.Close()
 
 	req := httptest.NewRequest("POST", "/upload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	_, err := uploaderUtility(req)
+	_, err := UploaderHelper(req)
 	if err == nil {
 		t.Error("Expected error for missing fileName")
 	}
@@ -123,19 +125,20 @@ func TestUploaderUtility_MissingFileName(t *testing.T) {
 	}
 }
 
-func TestUploaderUtility_InvalidChunkIndex(t *testing.T) {
+func TestUploaderHelper_InvalidChunkIndex(t *testing.T) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	writer.WriteField("fileName", "test.txt")
 	writer.WriteField("chunkIndex", "invalid")
 	writer.WriteField("totalChunks", "1")
 	writer.WriteField("fileSize", "100")
+	writer.WriteField("additionalParams", "")
 	writer.Close()
 
 	req := httptest.NewRequest("POST", "/upload", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	_, err := uploaderUtility(req)
+	_, err := UploaderHelper(req)
 	if err == nil {
 		t.Error("Expected error for invalid chunkIndex")
 	}
@@ -145,7 +148,7 @@ func TestUploaderUtility_InvalidChunkIndex(t *testing.T) {
 	}
 }
 
-func TestUploaderUtility_SingleChunkUpload(t *testing.T) {
+func TestUploaderHelper_SingleChunkUpload(t *testing.T) {
 	// Setup cleanup
 	defer func() {
 		os.RemoveAll("./temp_chunks")
@@ -155,14 +158,14 @@ func TestUploaderUtility_SingleChunkUpload(t *testing.T) {
 	testData := []byte("Hello, World!")
 	fileName := "test.txt"
 
-	req, err := createMultipartForm(fileName, 0, 1, int64(len(testData)), testData)
+	req, err := createMultipartForm(fileName, 0, 1, int64(len(testData)), testData, "")
 	if err != nil {
 		t.Fatalf("Failed to create multipart form: %v", err)
 	}
 
-	result, err := uploaderUtility(req)
+	result, err := UploaderHelper(req)
 	if err != nil {
-		t.Fatalf("uploaderUtility failed: %v", err)
+		t.Fatalf("UploaderHelper failed: %v", err)
 	}
 
 	// Check result
@@ -172,6 +175,15 @@ func TestUploaderUtility_SingleChunkUpload(t *testing.T) {
 
 	if result["fileName"] != fileName {
 		t.Errorf("Expected fileName '%s', got %v", fileName, result["fileName"])
+	}
+
+	// Check additionalParams is empty map
+	additionalParams, ok := result["additionalParams"].(map[string]interface{})
+	if !ok {
+		t.Fatal("additionalParams should be a map")
+	}
+	if len(additionalParams) != 0 {
+		t.Errorf("Expected empty additionalParams, got %v", additionalParams)
 	}
 
 	// Check metadata
@@ -205,7 +217,7 @@ func TestUploaderUtility_SingleChunkUpload(t *testing.T) {
 	}
 }
 
-func TestUploaderUtility_MultiChunkUpload(t *testing.T) {
+func TestUploaderHelper_MultiChunkUpload(t *testing.T) {
 	// Setup cleanup
 	defer func() {
 		os.RemoveAll("./temp_chunks")
@@ -218,14 +230,14 @@ func TestUploaderUtility_MultiChunkUpload(t *testing.T) {
 	totalSize := int64(len(chunk1Data) + len(chunk2Data))
 
 	// Upload first chunk
-	req1, err := createMultipartForm(fileName, 0, 2, totalSize, chunk1Data)
+	req1, err := createMultipartForm(fileName, 0, 2, totalSize, chunk1Data, "")
 	if err != nil {
 		t.Fatalf("Failed to create multipart form for chunk 1: %v", err)
 	}
 
-	result1, err := uploaderUtility(req1)
+	result1, err := UploaderHelper(req1)
 	if err != nil {
-		t.Fatalf("uploaderUtility failed for chunk 1: %v", err)
+		t.Fatalf("UploaderHelper failed for chunk 1: %v", err)
 	}
 
 	// Should not be complete yet
@@ -234,14 +246,14 @@ func TestUploaderUtility_MultiChunkUpload(t *testing.T) {
 	}
 
 	// Upload second chunk
-	req2, err := createMultipartForm(fileName, 1, 2, totalSize, chunk2Data)
+	req2, err := createMultipartForm(fileName, 1, 2, totalSize, chunk2Data, "")
 	if err != nil {
 		t.Fatalf("Failed to create multipart form for chunk 2: %v", err)
 	}
 
-	result2, err := uploaderUtility(req2)
+	result2, err := UploaderHelper(req2)
 	if err != nil {
-		t.Fatalf("uploaderUtility failed for chunk 2: %v", err)
+		t.Fatalf("UploaderHelper failed for chunk 2: %v", err)
 	}
 
 	// Should be complete now
@@ -274,6 +286,122 @@ func TestUploaderUtility_MultiChunkUpload(t *testing.T) {
 	expectedContent := append(chunk1Data, chunk2Data...)
 	if !bytes.Equal(content, expectedContent) {
 		t.Errorf("File content mismatch. Expected %s, got %s", expectedContent, content)
+	}
+}
+
+func TestUploaderHelper_AdditionalParams(t *testing.T) {
+	// Setup cleanup
+	defer func() {
+		os.RemoveAll("./temp_chunks")
+		os.RemoveAll("./uploads")
+	}()
+
+	testData := []byte("Hello, World!")
+	fileName := "test.txt"
+	additionalParams := `{"userId":"123","metadata":{"type":"document","category":"test"}}`
+
+	req, err := createMultipartForm(fileName, 0, 1, int64(len(testData)), testData, additionalParams)
+	if err != nil {
+		t.Fatalf("Failed to create multipart form: %v", err)
+	}
+
+	result, err := UploaderHelper(req)
+	if err != nil {
+		t.Fatalf("UploaderHelper failed: %v", err)
+	}
+
+	// Check that additionalParams is parsed correctly
+	params, ok := result["additionalParams"].(map[string]interface{})
+	if !ok {
+		t.Fatal("additionalParams should be a map")
+	}
+
+	if params["userId"] != "123" {
+		t.Errorf("Expected userId '123', got %v", params["userId"])
+	}
+
+	metadata, ok := params["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("metadata should be a map")
+	}
+
+	if metadata["type"] != "document" {
+		t.Errorf("Expected type 'document', got %v", metadata["type"])
+	}
+
+	if metadata["category"] != "test" {
+		t.Errorf("Expected category 'test', got %v", metadata["category"])
+	}
+}
+
+func TestUploaderHelper_InvalidAdditionalParams(t *testing.T) {
+	// Setup cleanup
+	defer func() {
+		os.RemoveAll("./temp_chunks")
+		os.RemoveAll("./uploads")
+	}()
+
+	testData := []byte("Hello, World!")
+	fileName := "test.txt"
+	invalidAdditionalParams := `{"invalid": json}`
+
+	req, err := createMultipartForm(fileName, 0, 1, int64(len(testData)), testData, invalidAdditionalParams)
+	if err != nil {
+		t.Fatalf("Failed to create multipart form: %v", err)
+	}
+
+	result, err := UploaderHelper(req)
+	if err != nil {
+		t.Fatalf("UploaderHelper failed: %v", err)
+	}
+
+	// Check that additionalParams defaults to empty map for invalid JSON
+	params, ok := result["additionalParams"].(map[string]interface{})
+	if !ok {
+		t.Fatal("additionalParams should be a map")
+	}
+
+	if len(params) != 0 {
+		t.Errorf("Expected empty additionalParams for invalid JSON, got %v", params)
+	}
+}
+
+func TestUploaderHelper_ChunkReceivedWithAdditionalParams(t *testing.T) {
+	// Setup cleanup
+	defer func() {
+		os.RemoveAll("./temp_chunks")
+		os.RemoveAll("./uploads")
+	}()
+
+	fileName := "test.txt"
+	chunk1Data := []byte("Hello, ")
+	totalSize := int64(13) // Total size for both chunks
+	additionalParams := `{"sessionId":"abc123"}`
+
+	// Upload first chunk only
+	req1, err := createMultipartForm(fileName, 0, 2, totalSize, chunk1Data, additionalParams)
+	if err != nil {
+		t.Fatalf("Failed to create multipart form for chunk 1: %v", err)
+	}
+
+	result1, err := UploaderHelper(req1)
+	if err != nil {
+		t.Fatalf("UploaderHelper failed for chunk 1: %v", err)
+	}
+
+	// Should not be complete yet
+	if result1["status"] != "chunk_received" {
+		t.Errorf("Expected status 'chunk_received' for first chunk, got %v", result1["status"])
+	}
+
+	// Check that additionalParams is returned
+	params, ok := result1["additionalParams"].(map[string]interface{})
+	if !ok {
+		t.Fatal("additionalParams should be a map")
+	}
+
+	if params["sessionId"] != "abc123" {
+		t.Errorf("Expected sessionId 'abc123', got %v", params["sessionId"])
 	}
 }
 
